@@ -374,7 +374,7 @@
         <div class="config-panel" id="configPanel">
             <h3>⚙️ Configuration</h3>
             <div class="config-row">
-                <input type="text" class="config-input" id="sheetApiUrl" placeholder="Google Apps Script URL">
+                <input type="text" class="config-input" id="sheetApiUrl" placeholder="Google Apps Script Web App URL (https://script.google.com/...)">
             </div>
             <div class="config-row">
                 <input type="password" class="config-input" id="claudeApiKey" placeholder="Claude API Key (sk-ant-...)">
@@ -468,7 +468,7 @@
     <script>
         // ===== CONFIGURATION =====
         const CONFIG = {
-            sheetApiUrl: localStorage.getItem('sheetApiUrl') || 'https://script.google.com/a/macros/razorpay.com/s/AKfycbwmT53Kuv_w21tIZ-lchjwIhldWMHusljm2Dw-4FtIEsKwbmFqgRwex9vvyR3tqSw8O/exec',
+            sheetApiUrl: localStorage.getItem('sheetApiUrl') || '',
             claudeApiKey: localStorage.getItem('claudeApiKey') || '',
             projectContext: localStorage.getItem('projectContext') || `You are helping a Platform PM at Razorpay draft Slack replies.
 Context:
@@ -516,33 +516,59 @@ Guidelines for replies:
         }
         
         // ===== DATA FETCHING =====
-        async function refreshData() {
+        async function refreshData(retryCount = 0) {
+            const MAX_RETRIES = 3;
+
             if (!CONFIG.sheetApiUrl) {
                 updateStatus('Not configured', false);
+                showError('Please configure your Google Apps Script URL in settings. Click the Config button above.');
                 return;
             }
-            
+
             updateStatus('Connecting...', 'loading');
             showLoading(true);
-            
+
             try {
                 const response = await fetch(CONFIG.sheetApiUrl);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}. Check if your Google Apps Script URL is correct and deployed as a web app.`);
+                }
+
                 const data = await response.json();
-                
+
                 if (data.error) {
                     throw new Error(data.error);
                 }
-                
+
                 mentions = data.mentions || [];
                 updateDashboard(data.stats);
                 updateStatus(`Connected · ${mentions.length} mentions`, true);
                 isConnected = true;
                 applyFilters();
-                
+
             } catch (error) {
                 console.error('Fetch error:', error);
+
+                // Retry on network errors
+                if (retryCount < MAX_RETRIES && (error.name === 'TypeError' || error.message.includes('NetworkError'))) {
+                    const delay = Math.pow(2, retryCount) * 1000; // Exponential backoff: 1s, 2s, 4s
+                    updateStatus(`Retrying in ${delay/1000}s... (${retryCount + 1}/${MAX_RETRIES})`, 'loading');
+                    setTimeout(() => refreshData(retryCount + 1), delay);
+                    return;
+                }
+
                 updateStatus('Connection failed', false);
-                showError(error.message);
+
+                // Provide specific error guidance
+                let errorMessage = error.message;
+                if (error.message.includes('Failed to fetch') || error.name === 'TypeError') {
+                    errorMessage = 'Network error: Could not reach the server. This may be a CORS issue. Ensure your Google Apps Script is deployed with "Anyone" access and "Execute as: Me".';
+                } else if (error.message.includes('Unexpected token')) {
+                    errorMessage = 'Invalid response from server. Your Google Apps Script may not be returning valid JSON.';
+                }
+
+                showError(errorMessage);
             } finally {
                 showLoading(false);
             }
@@ -592,7 +618,11 @@ Please draft a concise, helpful reply. Be specific and actionable.`;
                 
             } catch (error) {
                 console.error('Claude API error:', error);
-                alert('Failed to generate reply: ' + error.message);
+                let errorMsg = error.message;
+                if (error.message.includes('Failed to fetch') || error.name === 'TypeError') {
+                    errorMsg = 'CORS error: The Claude API cannot be called directly from a browser. You need to use a backend proxy server to make API calls.';
+                }
+                alert('Failed to generate reply: ' + errorMsg);
                 return null;
             }
         }
@@ -802,19 +832,22 @@ Please draft a concise, helpful reply. Be specific and actionable.`;
         async function saveReply() {
             const reply = document.getElementById('replyText').value;
             const mention = filteredMentions[currentIndex];
-            
+
             if (!CONFIG.sheetApiUrl) return;
-            
+
             try {
                 await fetch(CONFIG.sheetApiUrl, {
                     method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
                     body: JSON.stringify({
                         action: 'saveSuggestedReply',
                         id: mention.id,
                         suggestedReply: reply
                     })
                 });
-                
+
                 mention.suggestedReply = reply;
                 alert('Saved!');
             } catch (error) {
@@ -825,11 +858,14 @@ Please draft a concise, helpful reply. Be specific and actionable.`;
         async function markReplied() {
             const mention = filteredMentions[currentIndex];
             const reply = document.getElementById('replyText')?.value || '';
-            
+
             if (CONFIG.sheetApiUrl) {
                 try {
                     await fetch(CONFIG.sheetApiUrl, {
                         method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
                         body: JSON.stringify({
                             action: 'markReplied',
                             id: mention.id,
