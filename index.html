@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Slack Mention Reviewer</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e0e0e0;
+            padding: 20px;
+        }
+        .container { max-width: 720px; margin: 0 auto; }
+        
+        /* Config Panel */
+        .config-panel {
+            background: rgba(255,200,0,0.1);
+            border: 1px solid rgba(255,200,0,0.3);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        .config-panel.show { display: block; }
+        .config-panel h3 { color: #ffd43b; margin-bottom: 12px; font-size: 14px; }
+        .config-input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid rgba(255,255,255,0.2);
+            background: rgba(0,0,0,0.3);
+            border-radius: 8px;
+            color: #fff;
+            font-size: 13px;
+            margin-bottom: 8px;
+        }
+        .config-input::placeholder { color: #666; }
+        .config-row { display: flex; gap: 8px; margin-bottom: 8px; }
+        .config-row .config-input { flex: 1; }
+        .btn-config {
+            background: #ffd43b;
+            color: #1a1a2e;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        .btn-toggle-config {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(255,255,255,0.1);
+            border: none;
+            padding: 8px 12px;
+            border-radius: 8px;
+            color: #888;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        
+        /* Status indicator */
+        .status-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+            font-size: 12px;
+            color: #666;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ff6b6b;
+        }
+        .status-dot.connected { background: #51cf66; }
+        .status-dot.loading { background: #ffd43b; animation: pulse 1s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        
+        /* Dashboard */
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 16px;
+            text-align: center;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .stat-card.pending { border-left: 4px solid #ff6b6b; }
+        .stat-card.replied { border-left: 4px solid #51cf66; }
+        .stat-card.fyi { border-left: 4px solid #748ffc; }
+        .stat-card.total { border-left: 4px solid #ffd43b; }
+        .stat-num { font-size: 28px; font-weight: 700; color: #fff; }
+        .stat-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
+        
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 15px 20px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+        }
+        .header-title { font-size: 20px; font-weight: 600; }
+        .progress-text { font-size: 14px; color: #888; margin-top: 4px; }
+        .progress-bar { width: 150px; height: 6px; background: #333; border-radius: 3px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #4CAF50, #8BC34A); transition: width 0.3s ease; }
+        
+        /* Date Selector */
+        .date-selector {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .date-btn {
+            padding: 6px 14px;
+            border: 1px solid rgba(255,255,255,0.15);
+            background: transparent;
+            border-radius: 16px;
+            color: #666;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+        .date-btn:hover { border-color: #748ffc; color: #748ffc; }
+        .date-btn.active { background: #748ffc; border-color: #748ffc; color: white; }
+        
+        /* Filters */
+        .filters {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .filter-btn {
+            padding: 8px 16px;
+            border: 1px solid rgba(255,255,255,0.2);
+            background: transparent;
+            border-radius: 20px;
+            color: #888;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+        .filter-btn:hover { border-color: #4CAF50; color: #4CAF50; }
+        .filter-btn.active { background: #4CAF50; border-color: #4CAF50; color: white; }
+        
+        /* Card */
+        .card {
+            background: rgba(255,255,255,0.08);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 16px;
+        }
+        .badges { display: flex; gap: 8px; flex-wrap: wrap; }
+        .priority { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+        .p1 { background: #ff4757; color: white; }
+        .p2 { background: #ffa502; color: #1a1a2e; }
+        .p3 { background: #3742fa; color: white; }
+        
+        .status-badge { padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+        .status-pending { background: rgba(255,107,107,0.2); color: #ff6b6b; border: 1px solid #ff6b6b; }
+        .status-replied { background: rgba(81,207,102,0.2); color: #51cf66; border: 1px solid #51cf66; }
+        
+        .channel { font-size: 13px; color: #888; }
+        .sender { font-size: 15px; font-weight: 600; color: #fff; margin-bottom: 4px; }
+        .time { font-size: 12px; color: #666; }
+        
+        .message {
+            background: rgba(0,0,0,0.3);
+            border-radius: 10px;
+            padding: 16px;
+            margin: 16px 0;
+            font-size: 14px;
+            line-height: 1.6;
+            color: #ccc;
+            max-height: 180px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        
+        .context {
+            font-size: 13px;
+            color: #888;
+            padding: 10px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+            margin-bottom: 12px;
+            border-left: 3px solid #444;
+        }
+        
+        /* Reply Section */
+        .reply-section {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+        .reply-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .reply-label {
+            font-size: 12px;
+            text-transform: uppercase;
+            color: #4CAF50;
+            letter-spacing: 1px;
+        }
+        .btn-generate {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn-generate:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-generate.loading::after {
+            content: '';
+            width: 12px;
+            height: 12px;
+            border: 2px solid white;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        .reply-textarea {
+            width: 100%;
+            min-height: 100px;
+            background: rgba(76, 175, 80, 0.1);
+            border: 1px solid rgba(76, 175, 80, 0.3);
+            border-radius: 10px;
+            padding: 14px;
+            font-size: 14px;
+            line-height: 1.5;
+            color: #a5d6a7;
+            font-family: inherit;
+            resize: vertical;
+            margin-bottom: 10px;
+        }
+        .reply-textarea:focus {
+            outline: none;
+            border-color: #4CAF50;
+            box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+        }
+        .reply-actions { display: flex; gap: 8px; }
+        .btn-copy, .btn-save {
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            border: none;
+        }
+        .btn-copy { background: rgba(76, 175, 80, 0.2); color: #a5d6a7; border: 1px solid rgba(76, 175, 80, 0.3); }
+        .btn-save { background: #4CAF50; color: white; }
+        
+        /* Actions */
+        .actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .btn {
+            flex: 1;
+            padding: 14px 20px;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .btn:hover { transform: translateY(-2px); }
+        .btn-skip { background: #333; color: #888; }
+        .btn-done { background: #4CAF50; color: white; }
+        .btn-open { background: #2196F3; color: white; }
+        
+        /* Navigation */
+        .nav {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 20px;
+        }
+        .nav-btn {
+            padding: 10px 20px;
+            background: rgba(255,255,255,0.1);
+            border: none;
+            border-radius: 8px;
+            color: #888;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        
+        /* Empty/Error states */
+        .empty-state, .error-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+        .empty-state h2 { color: #4CAF50; margin-bottom: 10px; }
+        .error-state h2 { color: #ff6b6b; margin-bottom: 10px; }
+        .error-state button { margin-top: 16px; }
+        
+        /* Keyboard hints */
+        .keyboard-hints {
+            text-align: center;
+            font-size: 11px;
+            color: #555;
+            margin-top: 20px;
+        }
+        .keyboard-hints kbd {
+            background: rgba(255,255,255,0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+        
+        /* Loading overlay */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            display: none;
+        }
+        .loading-overlay.show { display: flex; }
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #333;
+            border-top-color: #4CAF50;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+    </style>
+</head>
+<body>
+    <button class="btn-toggle-config" onclick="toggleConfig()">⚙️ Config</button>
+    
+    <div class="container">
+        <!-- Config Panel -->
+        <div class="config-panel" id="configPanel">
+            <h3>⚙️ Configuration</h3>
+            <div class="config-row">
+                <input type="text" class="config-input" id="sheetApiUrl" placeholder="Google Apps Script URL">
+            </div>
+            <div class="config-row">
+                <input type="password" class="config-input" id="claudeApiKey" placeholder="Claude API Key (sk-ant-...)">
+            </div>
+            <div class="config-row">
+                <input type="text" class="config-input" id="projectContext" placeholder="Platform Org context (optional)">
+            </div>
+            <button class="btn-config" onclick="saveConfig()">💾 Save & Connect</button>
+        </div>
+        
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <span class="status-dot" id="statusDot"></span>
+            <span id="statusText">Not connected</span>
+            <span style="margin-left: auto; cursor: pointer;" onclick="refreshData()">🔄 Refresh</span>
+        </div>
+        
+        <!-- Dashboard -->
+        <div class="dashboard">
+            <div class="stat-card pending">
+                <div class="stat-num" id="pendingCount">-</div>
+                <div class="stat-label">Pending</div>
+            </div>
+            <div class="stat-card replied">
+                <div class="stat-num" id="repliedCount">-</div>
+                <div class="stat-label">Replied</div>
+            </div>
+            <div class="stat-card fyi">
+                <div class="stat-num" id="fyiCount">-</div>
+                <div class="stat-label">FYI Only</div>
+            </div>
+            <div class="stat-card total">
+                <div class="stat-num" id="totalCount">-</div>
+                <div class="stat-label">Total</div>
+            </div>
+        </div>
+        
+        <!-- Header -->
+        <div class="header">
+            <div>
+                <div class="header-title">📬 Slack Mentions</div>
+                <div class="progress-text"><span id="currentNum">0</span> of <span id="totalFiltered">0</span></div>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+            </div>
+        </div>
+        
+        <!-- Date Selector -->
+        <div class="date-selector">
+            <button class="date-btn active" data-date="all">All Dates</button>
+            <button class="date-btn" data-date="today">Today</button>
+            <button class="date-btn" data-date="yesterday">Yesterday</button>
+            <button class="date-btn" data-date="week">This Week</button>
+        </div>
+        
+        <!-- Filters -->
+        <div class="filters">
+            <button class="filter-btn active" data-filter="pending">⏳ Pending</button>
+            <button class="filter-btn" data-filter="replied">✅ Replied</button>
+            <button class="filter-btn" data-filter="all">All</button>
+            <button class="filter-btn" data-filter="p1">🔴 P1</button>
+            <button class="filter-btn" data-filter="p2">🟠 P2</button>
+        </div>
+        
+        <!-- Card Container -->
+        <div id="cardContainer">
+            <div class="empty-state">
+                <h2>👋 Welcome</h2>
+                <p>Click ⚙️ Config to connect your Google Sheet</p>
+            </div>
+        </div>
+        
+        <!-- Navigation -->
+        <div class="nav">
+            <button class="nav-btn" id="prevBtn" onclick="navigate(-1)" disabled>← Previous</button>
+            <button class="nav-btn" id="nextBtn" onclick="navigate(1)" disabled>Next →</button>
+        </div>
+        
+        <!-- Keyboard hints -->
+        <div class="keyboard-hints">
+            <kbd>←</kbd> <kbd>→</kbd> navigate · <kbd>R</kbd> mark replied · <kbd>O</kbd> open Slack · <kbd>G</kbd> generate reply
+        </div>
+    </div>
+    
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner"></div>
+    </div>
+
+    <script>
+        // ===== CONFIGURATION =====
+        const CONFIG = {
+            sheetApiUrl: localStorage.getItem('sheetApiUrl') || 'https://script.google.com/a/macros/razorpay.com/s/AKfycbwmT53Kuv_w21tIZ-lchjwIhldWMHusljm2Dw-4FtIEsKwbmFqgRwex9vvyR3tqSw8O/exec',
+            claudeApiKey: localStorage.getItem('claudeApiKey') || '',
+            projectContext: localStorage.getItem('projectContext') || `You are helping a Platform PM at Razorpay draft Slack replies.
+Context:
+- Services owned: Routing, Terminal, Payments Onboarding, Downtime, Beacon
+- Key metrics: Rule NTF 99K→30K, Terminal NTF 11K→5.5K, ARI 23.54%→<10%, MTTC 85min→<10min
+- Q4 priorities: Router Canary, Credential Expiry Monitoring, Web Scraper fix
+
+Guidelines for replies:
+- Be specific (use metrics, names, timelines)
+- Acknowledge delays when applicable
+- Provide clear action items with owners
+- Keep it concise but complete`
+        };
+        
+        // ===== STATE =====
+        let mentions = [];
+        let filteredMentions = [];
+        let currentIndex = 0;
+        let currentFilter = 'pending';
+        let currentDateFilter = 'all';
+        let isConnected = false;
+        
+        // ===== CONFIG MANAGEMENT =====
+        function toggleConfig() {
+            const panel = document.getElementById('configPanel');
+            panel.classList.toggle('show');
+            if (panel.classList.contains('show')) {
+                document.getElementById('sheetApiUrl').value = CONFIG.sheetApiUrl;
+                document.getElementById('claudeApiKey').value = CONFIG.claudeApiKey;
+                document.getElementById('projectContext').value = CONFIG.projectContext;
+            }
+        }
+        
+        function saveConfig() {
+            CONFIG.sheetApiUrl = document.getElementById('sheetApiUrl').value.trim();
+            CONFIG.claudeApiKey = document.getElementById('claudeApiKey').value.trim();
+            CONFIG.projectContext = document.getElementById('projectContext').value.trim();
+            
+            localStorage.setItem('sheetApiUrl', CONFIG.sheetApiUrl);
+            localStorage.setItem('claudeApiKey', CONFIG.claudeApiKey);
+            localStorage.setItem('projectContext', CONFIG.projectContext);
+            
+            document.getElementById('configPanel').classList.remove('show');
+            refreshData();
+        }
+        
+        // ===== DATA FETCHING =====
+        async function refreshData() {
+            if (!CONFIG.sheetApiUrl) {
+                updateStatus('Not configured', false);
+                return;
+            }
+            
+            updateStatus('Connecting...', 'loading');
+            showLoading(true);
+            
+            try {
+                const response = await fetch(CONFIG.sheetApiUrl);
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                mentions = data.mentions || [];
+                updateDashboard(data.stats);
+                updateStatus(`Connected · ${mentions.length} mentions`, true);
+                isConnected = true;
+                applyFilters();
+                
+            } catch (error) {
+                console.error('Fetch error:', error);
+                updateStatus('Connection failed', false);
+                showError(error.message);
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        // ===== CLAUDE API INTEGRATION =====
+        async function generateReply(mention) {
+            if (!CONFIG.claudeApiKey) {
+                alert('Please configure Claude API key in settings');
+                return null;
+            }
+            
+            const prompt = `${CONFIG.projectContext}
+
+---
+
+Slack Mention to Reply To:
+Channel: ${mention.channel}
+From: ${mention.sender}
+Message: ${mention.message}
+${mention.context ? `Context: ${mention.context}` : ''}
+
+Please draft a concise, helpful reply. Be specific and actionable.`;
+
+            try {
+                const response = await fetch('https://api.anthropic.com/v1/messages', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-api-key': CONFIG.claudeApiKey,
+                        'anthropic-version': '2023-06-01'
+                    },
+                    body: JSON.stringify({
+                        model: 'claude-sonnet-4-20250514',
+                        max_tokens: 500,
+                        messages: [{ role: 'user', content: prompt }]
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error.message);
+                }
+                
+                return data.content[0].text;
+                
+            } catch (error) {
+                console.error('Claude API error:', error);
+                alert('Failed to generate reply: ' + error.message);
+                return null;
+            }
+        }
+        
+        // ===== UI UPDATES =====
+        function updateStatus(text, connected) {
+            document.getElementById('statusText').textContent = text;
+            const dot = document.getElementById('statusDot');
+            dot.classList.remove('connected', 'loading');
+            if (connected === true) dot.classList.add('connected');
+            if (connected === 'loading') dot.classList.add('loading');
+        }
+        
+        function updateDashboard(stats) {
+            document.getElementById('pendingCount').textContent = stats?.pending ?? '-';
+            document.getElementById('repliedCount').textContent = stats?.replied ?? '-';
+            document.getElementById('fyiCount').textContent = '0'; // Calculate from data if needed
+            document.getElementById('totalCount').textContent = stats?.total ?? '-';
+        }
+        
+        function showLoading(show) {
+            document.getElementById('loadingOverlay').classList.toggle('show', show);
+        }
+        
+        function showError(message) {
+            document.getElementById('cardContainer').innerHTML = `
+                <div class="error-state">
+                    <h2>❌ Error</h2>
+                    <p>${message}</p>
+                    <button class="btn btn-open" onclick="toggleConfig()">⚙️ Check Config</button>
+                </div>
+            `;
+        }
+        
+        // ===== FILTERING =====
+        function applyFilters() {
+            let result = [...mentions];
+            
+            // Date filter
+            if (currentDateFilter !== 'all') {
+                const now = new Date();
+                const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                
+                result = result.filter(m => {
+                    if (!m.timestamp) return true;
+                    const date = new Date(m.timestamp);
+                    
+                    switch(currentDateFilter) {
+                        case 'today':
+                            return date >= today;
+                        case 'yesterday':
+                            const yesterday = new Date(today);
+                            yesterday.setDate(yesterday.getDate() - 1);
+                            return date >= yesterday && date < today;
+                        case 'week':
+                            const weekStart = new Date(today);
+                            weekStart.setDate(today.getDate() - today.getDay());
+                            return date >= weekStart;
+                        default:
+                            return true;
+                    }
+                });
+            }
+            
+            // Status filter
+            switch(currentFilter) {
+                case 'pending':
+                    result = result.filter(m => !m.replied && m.actionable !== false);
+                    break;
+                case 'replied':
+                    result = result.filter(m => m.replied);
+                    break;
+                case 'p1':
+                    result = result.filter(m => m.priority === 'P1' && !m.replied);
+                    break;
+                case 'p2':
+                    result = result.filter(m => m.priority === 'P2' && !m.replied);
+                    break;
+            }
+            
+            filteredMentions = result;
+            currentIndex = 0;
+            renderCard();
+        }
+        
+        // ===== CARD RENDERING =====
+        function renderCard() {
+            const container = document.getElementById('cardContainer');
+            
+            if (!isConnected) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <h2>👋 Welcome</h2>
+                        <p>Click ⚙️ Config to connect your Google Sheet</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            if (filteredMentions.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <h2>🎉 All Clear!</h2>
+                        <p>No mentions matching this filter</p>
+                    </div>
+                `;
+                updateProgress();
+                return;
+            }
+            
+            const m = filteredMentions[currentIndex];
+            const priorityClass = (m.priority || 'P2').toLowerCase();
+            
+            container.innerHTML = `
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <div class="channel"># ${(m.channel || '').replace('#', '')}</div>
+                            <div class="sender">${m.sender || 'Unknown'}</div>
+                            <div class="time">${formatTime(m.timestamp)}</div>
+                        </div>
+                        <div class="badges">
+                            <span class="priority ${priorityClass}">${m.priority || 'P2'}</span>
+                            <span class="status-badge ${m.replied ? 'status-replied' : 'status-pending'}">
+                                ${m.replied ? '✓ Replied' : '⏳ Pending'}
+                            </span>
+                        </div>
+                    </div>
+                    
+                    <div class="message">${m.message || ''}</div>
+                    
+                    ${m.context ? `<div class="context">${m.context}</div>` : ''}
+                    
+                    <div class="reply-section">
+                        <div class="reply-header">
+                            <span class="reply-label">💡 Reply</span>
+                            <button class="btn-generate" id="btnGenerate" onclick="handleGenerateReply()">
+                                ✨ Generate with Claude
+                            </button>
+                        </div>
+                        <textarea class="reply-textarea" id="replyText" placeholder="Type your reply or click Generate...">${m.suggestedReply || ''}</textarea>
+                        <div class="reply-actions">
+                            <button class="btn-copy" onclick="copyReply()">📋 Copy</button>
+                            <button class="btn-save" onclick="saveReply()">💾 Save</button>
+                        </div>
+                    </div>
+                    
+                    <div class="actions">
+                        <button class="btn btn-skip" onclick="navigate(1)">⏭️ Next</button>
+                        <button class="btn btn-open" onclick="openSlack('${m.link}')">🔗 Open Slack</button>
+                        ${!m.replied ? `<button class="btn btn-done" onclick="markReplied()">✅ Mark Replied</button>` : ''}
+                    </div>
+                </div>
+            `;
+            
+            updateProgress();
+        }
+        
+        function formatTime(timestamp) {
+            if (!timestamp) return '';
+            const date = new Date(timestamp);
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+        }
+        
+        function updateProgress() {
+            const total = filteredMentions.length;
+            document.getElementById('currentNum').textContent = total > 0 ? currentIndex + 1 : 0;
+            document.getElementById('totalFiltered').textContent = total;
+            document.getElementById('progressFill').style.width = total > 0 ? ((currentIndex + 1) / total * 100) + '%' : '0%';
+            document.getElementById('prevBtn').disabled = currentIndex === 0;
+            document.getElementById('nextBtn').disabled = currentIndex >= total - 1;
+        }
+        
+        // ===== ACTIONS =====
+        function navigate(dir) {
+            currentIndex = Math.max(0, Math.min(filteredMentions.length - 1, currentIndex + dir));
+            renderCard();
+        }
+        
+        async function handleGenerateReply() {
+            const btn = document.getElementById('btnGenerate');
+            btn.disabled = true;
+            btn.classList.add('loading');
+            btn.textContent = ' Generating...';
+            
+            const reply = await generateReply(filteredMentions[currentIndex]);
+            
+            btn.disabled = false;
+            btn.classList.remove('loading');
+            btn.textContent = '✨ Generate with Claude';
+            
+            if (reply) {
+                document.getElementById('replyText').value = reply;
+            }
+        }
+        
+        function copyReply() {
+            const textarea = document.getElementById('replyText');
+            textarea.select();
+            document.execCommand('copy');
+            
+            const btn = event.target;
+            btn.textContent = '✅ Copied!';
+            setTimeout(() => btn.textContent = '📋 Copy', 2000);
+        }
+        
+        async function saveReply() {
+            const reply = document.getElementById('replyText').value;
+            const mention = filteredMentions[currentIndex];
+            
+            if (!CONFIG.sheetApiUrl) return;
+            
+            try {
+                await fetch(CONFIG.sheetApiUrl, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        action: 'saveSuggestedReply',
+                        id: mention.id,
+                        suggestedReply: reply
+                    })
+                });
+                
+                mention.suggestedReply = reply;
+                alert('Saved!');
+            } catch (error) {
+                alert('Failed to save: ' + error.message);
+            }
+        }
+        
+        async function markReplied() {
+            const mention = filteredMentions[currentIndex];
+            const reply = document.getElementById('replyText')?.value || '';
+            
+            if (CONFIG.sheetApiUrl) {
+                try {
+                    await fetch(CONFIG.sheetApiUrl, {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            action: 'markReplied',
+                            id: mention.id,
+                            reply: reply
+                        })
+                    });
+                } catch (error) {
+                    console.error('Failed to update sheet:', error);
+                }
+            }
+            
+            mention.replied = true;
+            
+            if (currentIndex < filteredMentions.length - 1) {
+                navigate(1);
+            } else {
+                applyFilters();
+            }
+        }
+        
+        function openSlack(link) {
+            if (link) window.open(link, '_blank');
+        }
+        
+        // ===== EVENT LISTENERS =====
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentFilter = btn.dataset.filter;
+                applyFilters();
+            });
+        });
+        
+        document.querySelectorAll('.date-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.date-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentDateFilter = btn.dataset.date;
+                applyFilters();
+            });
+        });
+        
+        document.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+            
+            switch(e.key) {
+                case 'ArrowLeft': navigate(-1); break;
+                case 'ArrowRight': navigate(1); break;
+                case 'r': case 'R': markReplied(); break;
+                case 'o': case 'O': openSlack(filteredMentions[currentIndex]?.link); break;
+                case 'g': case 'G': handleGenerateReply(); break;
+            }
+        });
+        
+        // ===== INIT =====
+        if (CONFIG.sheetApiUrl) {
+            refreshData();
+        }
+    </script>
+</body>
+</html>
