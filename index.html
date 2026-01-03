@@ -468,7 +468,7 @@
     <script>
         // ===== CONFIGURATION =====
         const CONFIG = {
-            sheetApiUrl: localStorage.getItem('sheetApiUrl') || '',
+            sheetApiUrl: localStorage.getItem('sheetApiUrl') || 'https://script.google.com/a/macros/razorpay.com/s/AKfycbwzKB8G_A9-jEITrSGlrsWzBznbcNU0BAN3QRycVRypA6edWu00XocPHKrx_Si4jBkv/exec',
             claudeApiKey: localStorage.getItem('claudeApiKey') || '',
             projectContext: localStorage.getItem('projectContext') || `You are helping a Platform PM at Razorpay draft Slack replies.
 Context:
@@ -542,7 +542,14 @@ Guidelines for replies:
                 }
 
                 mentions = data.mentions || [];
-                updateDashboard(data.stats);
+
+                // Calculate stats from mentions if not provided by backend
+                const stats = data.stats || {
+                    pending: mentions.filter(m => !m.replied).length,
+                    replied: mentions.filter(m => m.replied).length,
+                    total: mentions.length
+                };
+                updateDashboard(stats);
                 updateStatus(`Connected · ${mentions.length} mentions`, true);
                 isConnected = true;
                 applyFilters();
